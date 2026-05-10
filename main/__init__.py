@@ -13,13 +13,13 @@ logging.basicConfig(format='[%(levelname) 5s/%(asctime)s] %(name)s: %(message)s'
                     level=logging.WARNING)
 
 # variables
-API_ID = config("API_ID", default=None, cast=int)
+API_ID = config("API_ID", default=None, cast=lambda x: int(x) if x is not None else None)
 API_HASH = config("API_HASH", default=None)
 BOT_TOKEN = config("BOT_TOKEN", default=None)
 SESSION = config("SESSION", default=None)
 FORCESUB = config("FORCESUB", default=None)
-AUTH = config("AUTH", default=None, cast=int)
-SAVE_CHANNEL = config("SAVE_CHANNEL", default=None)  # Channel/group ID where content is saved (for pinning & inline link rewriting)
+AUTH = config("AUTH", default=None, cast=lambda x: int(x) if x is not None else None)
+SAVE_CHANNEL = config("SAVE_CHANNEL", default=None, cast=lambda x: int(x) if x is not None else None)  # Channel/group ID where content is saved (for pinning & inline link rewriting)
 
 # ---------------------------------------------------------------------------
 # MONKEY-PATCH: Fix Pyrogram's get_peer_type to handle unknown channel IDs
@@ -73,7 +73,7 @@ except BaseException as e:
 Bot = Client(
     "SaveRestricted",
     bot_token=BOT_TOKEN,
-    api_id=int(API_ID),
+    api_id=API_ID,
     api_hash=API_HASH
 )    
 
@@ -118,9 +118,9 @@ if SAVE_CHANNEL:
         import asyncio
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.ensure_future(Bot.get_chat(int(SAVE_CHANNEL)))
+            asyncio.ensure_future(Bot.get_chat(SAVE_CHANNEL))
         else:
-            loop.run_until_complete(Bot.get_chat(int(SAVE_CHANNEL)))
+            loop.run_until_complete(Bot.get_chat(SAVE_CHANNEL))
         print(f"[CACHE] SAVE_CHANNEL peer resolved: {SAVE_CHANNEL}")
     except Exception as e:
         print(f"[CACHE] Warning: Could not resolve SAVE_CHANNEL peer ({SAVE_CHANNEL}): {e}")

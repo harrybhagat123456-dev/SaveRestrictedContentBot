@@ -41,7 +41,7 @@ async def clone(event):
     # Determine where to save the content:
     # If SAVE_CHANNEL is configured, save to that channel (enables pinning & inline link support)
     # Otherwise, fall back to saving in the user's DM (original behavior)
-    target = int(SAVE_CHANNEL) if SAVE_CHANNEL else event.sender_id
+    target = SAVE_CHANNEL if SAVE_CHANNEL else event.sender_id
 
     # IMPORTANT FIX: Status/progress messages stay in the user's DM so they can see
     # what's happening. Content gets delivered to SAVE_CHANNEL (if configured).
