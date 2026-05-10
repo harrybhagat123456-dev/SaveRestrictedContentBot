@@ -339,9 +339,9 @@ async def get_msg(userbot, client, bot, sender, edit_id, status_chat, msg_link, 
                     )
                 )
 
-                # If download failed, try copy_message as fallback
-                if not file:
-                    print(f"[WARN] download_media returned None for msg {msg_id}, trying copy_message fallback")
+                # If download failed or file is empty, try copy_message as fallback
+                if not file or not os.path.exists(file) or os.path.getsize(file) == 0:
+                    print(f"[WARN] download_media returned empty/missing file for msg {msg_id}, trying copy_message fallback")
                     edit = await client.edit_message_text(status_chat, edit_id, "Trying to copy...")
                     caption = None
                     if msg.caption is not None:
@@ -575,20 +575,40 @@ async def get_msg(userbot, client, bot, sender, edit_id, status_chat, msg_link, 
 
                     if os.path.isfile(file) == True:
                         os.remove(file)
-                except Exception as e:
-                    print(e)
-                    await client.edit_message_text(status_chat, edit_id, f'Failed to save: `{msg_link}`\n\nError: {str(e)}')
+                except Exception as e2:
+                    print(f"Telethon fallback also failed: {e2}")
+                    # Telethon upload failed too — try copy_message as last resort
                     try:
                         os.remove(file)
                     except Exception:
-                        return
+                        pass
+                    caption = None
+                    if msg.caption is not None:
+                        caption = rewrite_inline_links(msg.caption, chat, sender)
+                    sent_msg = await copy_message_fallback(userbot, sender, chat, msg_id, caption)
+                    if sent_msg:
+                        register_msg_mapping(chat, msg_id, sender, sent_msg.id)
+                        await pin_if_channel(client, sender, sent_msg.id)
+                        await client.edit_message_text(status_chat, edit_id, "Saved via copy (upload failed).")
+                    else:
+                        await client.edit_message_text(status_chat, edit_id, f'Failed to save: `{msg_link}`\n\nError: {str(e2)}')
                     return
             else:
-                await client.edit_message_text(status_chat, edit_id, f'Failed to save: `{msg_link}`\n\nError: {str(e)}')
+                # Non-upload error — try copy_message fallback before giving up
+                caption = None
+                if msg.caption is not None:
+                    caption = rewrite_inline_links(msg.caption, chat, sender)
+                sent_msg = await copy_message_fallback(userbot, sender, chat, msg_id, caption)
+                if sent_msg:
+                    register_msg_mapping(chat, msg_id, sender, sent_msg.id)
+                    await pin_if_channel(client, sender, sent_msg.id)
+                    await client.edit_message_text(status_chat, edit_id, "Saved via copy (direct upload failed).")
+                else:
+                    await client.edit_message_text(status_chat, edit_id, f'Failed to save: `{msg_link}`\n\nError: {str(e)}')
                 try:
                     os.remove(file)
                 except Exception:
-                    return
+                    pass
                 return
         try:
             os.remove(file)
