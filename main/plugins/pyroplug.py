@@ -39,14 +39,21 @@ async def resolve_peer_safe(client, chat_id):
     """
     if chat_id in _resolved_peers:
         return True
-    # Fast path: get_chat works when the peer is already cached
+    # Fast path: resolve_peer works when the peer is already cached
+    try:
+        await client.resolve_peer(chat_id)
+        _resolved_peers.add(chat_id)
+        return True
+    except Exception:
+        pass
+    # Medium path: get_chat forces a full API call to fetch peer info
     try:
         await client.get_chat(chat_id)
         _resolved_peers.add(chat_id)
         return True
     except Exception:
         pass
-    # Slow path: iterate dialogs until we find the channel
+    # Slow path: iterate all dialogs to cache every peer
     try:
         async for dialog in client.get_dialogs():
             if dialog.chat and dialog.chat.id == chat_id:
@@ -55,6 +62,21 @@ async def resolve_peer_safe(client, chat_id):
     except Exception:
         pass
     return False
+
+
+async def ensure_target_peer(client, target_chat):
+    """
+    Before sending content to SAVE_CHANNEL, make sure the bot client has
+    the access hash cached. This prevents PeerIdInvalid during send operations.
+    Logs a warning but doesn't crash if the peer can't be resolved.
+    """
+    if isinstance(target_chat, int) and target_chat < -1000000000000:
+        # This is a channel/supergroup ID — resolve it
+        resolved = await resolve_peer_safe(client, target_chat)
+        if not resolved:
+            print(f"[WARN] Could not resolve peer for {target_chat}. "
+                  f"Make sure the bot is an admin in this channel.")
+    return True
 
 
 def thumbnail(sender):
@@ -315,6 +337,9 @@ async def get_msg(userbot, client, bot, sender, edit_id, status_chat, msg_link, 
     msg_id = int(msg_link.split("/")[-1]) + int(i)
     height, width, duration, thumb_path = 90, 90, 0, None
 
+    # Before doing anything, ensure the bot client can resolve the target chat (SAVE_CHANNEL)
+    await ensure_target_peer(client, sender)
+
     if 't.me/c/' in msg_link or 't.me/b/' in msg_link:
         if 't.me/b/' in msg_link:
             chat = str(msg_link.split("/")[-2])
@@ -322,7 +347,7 @@ async def get_msg(userbot, client, bot, sender, edit_id, status_chat, msg_link, 
             chat = int('-100' + str(msg_link.split("/")[-2]))
         file = ""
         try:
-            # Ensure the access hash for this channel is in Pyrogram's cache.
+            # Ensure the access hash for this channel is in userbot's cache.
             await resolve_peer_safe(userbot, chat)
             msg = await userbot.get_messages(chat, msg_id)
 
