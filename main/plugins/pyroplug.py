@@ -211,7 +211,43 @@ def _extract_correct_option(poll):
     return correct_idx, explanation, explanation_entities
 
 
-async def forward_poll(client, target_chat, msg, status_msg):
+async def _send_caption(client, target_chat, msg, original_chat, sender):
+    """Send the original message's caption as a pink-styled blockquote message."""
+    caption_text = None
+    if msg.caption:
+        caption_text = msg.caption
+    elif msg.text and msg.poll is not None:
+        # For poll-only messages, the "caption" might be the text before the poll
+        caption_text = None
+
+    if not caption_text:
+        return None
+
+    # Rewrite any inline links in the caption
+    rewritten = rewrite_inline_links(caption_text, original_chat, sender)
+
+    # Send as a pink blockquote-style message
+    # Telegram blockquote shows a colored left bar — we use it for the "pink caption" effect
+    try:
+        from pyrogram.types import MessageEntity
+        caption_msg = await client.send_message(
+            target_chat,
+            rewritten,
+            quote=True,  # blockquote styling
+        )
+        return caption_msg
+    except Exception:
+        # Fallback if quote param not supported — use markdown blockquote
+        try:
+            quoted = f"> {rewritten}"
+            caption_msg = await client.send_message(target_chat, quoted)
+            return caption_msg
+        except Exception as e:
+            print(f"[CAPTION] Could not send caption: {e}")
+            return None
+
+
+async def forward_poll(client, target_chat, msg, status_msg, original_chat=None, sender=None):
     poll = msg.poll
     if poll is None:
         return None
@@ -235,11 +271,18 @@ async def forward_poll(client, target_chat, msg, status_msg):
     except Exception:
         pass
 
+    # ---- Send caption BEFORE the poll if present ----
+    if original_chat is not None and sender is not None:
+        await _send_caption(client, target_chat, msg, original_chat, sender)
+
     sent_msg = None
 
     # ---- Strategy 1: Pyrogram send_poll (quiz with correct answer) ----
     if is_quiz and correct_idx is not None:
         try:
+            # For quiz polls: mark options with spoiler on the correct answer hint
+            # The actual poll is sent normally, but in the vote summary the correct
+            # answer will be wrapped in ||spoiler|| markdown
             sent_msg = await client.send_poll(
                 chat_id=target_chat,
                 question=poll.question,
@@ -370,16 +413,17 @@ async def forward_poll(client, target_chat, msg, status_msg):
         poll_text += f"**Status:** {'Closed' if poll.is_closed else 'Open'}\n"
         poll_text += f"**Type:** {'Quiz' if is_quiz else 'Regular'}\n\n"
         for idx, opt in enumerate(poll.options):
-            marker = ""
             if is_quiz and idx == correct_idx:
-                marker = " (Correct Answer)"
-            poll_text += f"  {idx + 1}. {opt.text} - {opt.voter_count} vote(s){marker}\n"
+                # Spoiler the correct answer in text fallback
+                poll_text += f"  {idx + 1}. ||{opt.text}|| - {opt.voter_count} vote(s) (Correct)\n"
+            else:
+                poll_text += f"  {idx + 1}. {opt.text} - {opt.voter_count} vote(s)\n"
         if explanation:
             poll_text += f"\n**Explanation:** {explanation}"
         sent_msg = await client.send_message(target_chat, poll_text)
         print(f"[POLL] Strategy 4: text fallback")
 
-    # ---- Always send vote summary ----
+    # ---- Always send vote summary with spoiler on correct answer ----
     else:
         try:
             vote_info = "**Original Poll Vote Summary:**\n\n"
@@ -389,10 +433,12 @@ async def forward_poll(client, target_chat, msg, status_msg):
             vote_info += f"**Type:** {'Quiz' if is_quiz else 'Regular'}\n"
             vote_info += f"**Anonymous:** {'Yes' if is_anonymous else 'No'}\n\n"
             for idx, opt in enumerate(poll.options):
-                marker = ""
                 if is_quiz and idx == correct_idx:
-                    marker = " (Correct Answer)"
-                vote_info += f"  {idx + 1}. {opt.text} - {opt.voter_count} vote(s){marker}\n"
+                    # Wrap correct answer in ||spoiler|| — user must click to reveal
+                    # After revealing, Telegram keeps it visible (client-side behavior)
+                    vote_info += f"  {idx + 1}. ||{opt.text}|| - {opt.voter_count} vote(s) (Correct)\n"
+                else:
+                    vote_info += f"  {idx + 1}. {opt.text} - {opt.voter_count} vote(s)\n"
             if explanation:
                 vote_info += f"\n**Explanation:** {explanation}"
             await client.send_message(target_chat, vote_info)
@@ -470,7 +516,7 @@ async def get_msg(userbot, client, bot, sender, edit_id, status_chat, msg_link, 
             # ---- POLL HANDLING ----
             if msg.poll is not None:
                 edit = await client.edit_message_text(status_chat, edit_id, "Processing poll...")
-                sent_msg = await forward_poll(client, sender, msg, edit)
+                sent_msg = await forward_poll(client, sender, msg, edit, original_chat=chat, sender=sender)
                 if sent_msg:
                     register_msg_mapping(chat, msg_id, sender, sent_msg.id)
                     await pin_if_channel(client, sender, sent_msg.id)
@@ -798,7 +844,7 @@ async def get_msg(userbot, client, bot, sender, edit_id, status_chat, msg_link, 
 
             # ---- POLL HANDLING for public chats ----
             if msg.poll is not None:
-                sent_msg = await forward_poll(client, sender, msg, edit)
+                sent_msg = await forward_poll(client, sender, msg, edit, original_chat=chat, sender=sender)
                 if sent_msg:
                     register_msg_mapping(chat, msg_id, sender, sent_msg.id)
                     await pin_if_channel(client, sender, sent_msg.id)

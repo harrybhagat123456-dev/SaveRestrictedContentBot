@@ -9,6 +9,7 @@ from .. import userbot, Bot, SAVE_CHANNEL
 from .. import FORCESUB as fs
 from main.plugins.pyroplug import get_msg
 from main.plugins.helpers import get_link, join
+from main.plugins.setchat import get_target_chat
 
 from telethon import events
 from pyrogram.errors import FloodWait
@@ -39,9 +40,10 @@ async def clone(event):
             return
 
     # Determine where to save the content:
-    # If SAVE_CHANNEL is configured, save to that channel (enables pinning & inline link support)
-    # Otherwise, fall back to saving in the user's DM (original behavior)
-    target = SAVE_CHANNEL if SAVE_CHANNEL else event.sender_id
+    # 1. If user set a custom transfer chat via /setchat, use that
+    # 2. If SAVE_CHANNEL is configured, use that
+    # 3. Otherwise, fall back to saving in the user's DM (original behavior)
+    target = get_target_chat(event.sender_id) or SAVE_CHANNEL or event.sender_id
 
     # IMPORTANT FIX: Status/progress messages stay in the user's DM so they can see
     # what's happening. Content gets delivered to SAVE_CHANNEL (if configured).
